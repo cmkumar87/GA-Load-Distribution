@@ -32,6 +32,13 @@ private int numEvolutions;
 private double payloadMaxWeight; 
 private String inputFile;
 private double genotypeAvgFitness;
+private double maxGenotypeFitness;
+private double fitnessDelta;
+
+//file and external stuff variables here
+FileWriter fr = new FileWriter("C:\\temp\\1.log",true);
+BufferedWriter output = new BufferedWriter(fr);
+      
     public LoadDistribution(String inputFile) throws Exception{
       this.inputFile = inputFile;
       initPayload();
@@ -64,7 +71,7 @@ private double genotypeAvgFitness;
         POIFSFileSystem myFileSystem = new POIFSFileSystem(myInput);
  
         /** Create a workbook using the File System**/
-         HSSFWorkbook myWorkBook = new HSSFWorkbook(myFileSystem);
+        HSSFWorkbook myWorkBook = new HSSFWorkbook(myFileSystem);
  
          /** Get the first sheet from workbook**/
         HSSFSheet mySheet = myWorkBook.getSheetAt(0);
@@ -212,18 +219,23 @@ private double genotypeAvgFitness;
         progress++;
         IChromosome fittest = a_genotype.getFittestChromosome();
         double fitness = fittest.getFitnessValue();
-        System.out.println("Currently best solution has fitness " +
+        writer("Currently best solution has fitness " +
                            fitness);
         printSolution(fittest);
       }
+      // Finding MaxFitness in the Population
+      IChromosome best = a_genotype.getFittestChromosome();
+      maxGenotypeFitness = best.getFitnessValue();
+      // Finding Average Fitness of every population
       List<IChromosome> chromosomes = a_genotype.getPopulation().getChromosomes();
       int sumFitness = 0;
       for (IChromosome chromosome:chromosomes){
           sumFitness += chromosome.getFitnessValue();
       }
           genotypeAvgFitness = sumFitness/a_genotype.getPopulation().size();
-          System.out.println("Population Size: "+a_genotype.getPopulation().size());
-          System.out.println("Average Fitness of the Population: "+ genotypeAvgFitness);
+          fitnessDelta = maxGenotypeFitness - genotypeAvgFitness;
+          writer("Average Fitness of the Population: "+ genotypeAvgFitness);
+          writer("fitnessDelta: "+fitnessDelta);
           sumFitness = 0;
           chromosomes = null;
     }
@@ -231,7 +243,7 @@ private double genotypeAvgFitness;
     // Print summary.
     // --------------
     IChromosome fittest = a_genotype.getFittestChromosome();
-    System.out.println("Best solution has fitness " +
+    writer("Best solution has fitness " +
                        fittest.getFitnessValue());
     printSolution(fittest);
   }
@@ -241,28 +253,28 @@ private double genotypeAvgFitness;
     public void printSolution(IChromosome a_solution) throws FileNotFoundException,IOException{
     double groupWeights = 0.0d;
     for (int i = 0; i < 16; i++) {
-      System.out.println("\nGroup " + i);
-      System.out.println("-------");
+      writer("\nGroup " + i);
+      writer("-------");
       double groupWeight = 0.0d;
       for (int j = 1; j < 5; j++) {
         IntegerGene containerID = (IntegerGene) a_solution.getGene( (i * 4 + j));
         ShipContainer container = (ShipContainer) payload[containerID.intValue()];
         double weight = container.getWeight();
         groupWeight += weight;
-        System.out.println(" Container with id "
+        writer(" Container with id "
                            + containerID.intValue()
                            + " with weight "
                            + weight);
       }
       groupWeights += groupWeight;
-      System.out.println("  --> Group weight: " + groupWeight);
+      writer("  --> Group weight: " + groupWeight);
     }
     writer("\n Average group weight: " + groupWeights / 16);
+    
   }
     
   public void writer(String str) throws FileNotFoundException,IOException{
-      FileWriter fr = new FileWriter("C:\\temp\\1.log");
-      Writer output = new BufferedWriter(fr);
+      System.out.println(str);
       output.write(str);
   }
     public static void main(String[] args) {
