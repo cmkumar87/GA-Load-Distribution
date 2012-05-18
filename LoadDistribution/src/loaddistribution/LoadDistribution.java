@@ -16,6 +16,10 @@ import org.apache.poi.poifs.filesystem.POIFSFileSystem;
 import java.util.Vector;
 import java.util.Iterator;
 import org.apache.poi.hssf.usermodel.*;
+import org.jgap.audit.ChainedMonitors;
+import org.jgap.audit.FitnessImprovementMonitor;
+import org.jgap.audit.IEvolutionMonitor;
+import org.jgap.audit.TimedMonitor;
 //------------------------------------------------------
 
 
@@ -24,44 +28,265 @@ import org.apache.poi.hssf.usermodel.*;
  * @author A0092669M
  */
 public class LoadDistribution {
-private ShipContainer container;
-private ShipContainer[] payload;
-private IChromosome chromosome; 
-//User input data
-private int numEvolutions;
-private double payloadMaxWeight; 
-private String inputFile;
-private double genotypeAvgFitness;
-private double maxGenotypeFitness;
-private double fitnessDelta;
 
-//file and external stuff variables here
-FileWriter fr = new FileWriter("C:\\temp\\1.log",true);
-BufferedWriter output = new BufferedWriter(fr);
+    //Application specific class variables
+    private ShipContainer container;
+    private ShipContainer[] payload;
+
+    // JGAP class variables
+    private IChromosome chromosome; 
+    private CrossoverOperator crossover;
+    private SwappingMutationOperator swapper;
+    private CrossoverRateCalculator crossRateCalc;
+    private MutationRateCalculator muteRateCalc;
+    private Constraint lightWeightConstraint;
+
+    //User input data
+    private int numEvolutions;
+    private double payloadMaxWeight;
+    private String inputFile;
+
+    //other intermediate variables
+    private boolean adaptive = false;
+    private double indFitness;
+    private double genotypeAvgFitness;
+    private double maxGenotypeFitness;
+    private double fitnessDelta;
+
+    //File and external stuff variables
+    String logFile = "C:\\temp\\1.log";
+    FileWriter file = new FileWriter(logFile,true);
+    BufferedWriter output = new BufferedWriter(file);
+    IEvolutionMonitor monitor;
       
-    public LoadDistribution(String inputFile) throws Exception{
+    public LoadDistribution(String inputFile, String configFile) throws Exception{
       this.inputFile = inputFile;
       initPayload();
+      lightWeightConstraint = new Constraint(payload);
       Genotype genotype = configureJGAP();
+      //setupMonitor();
       doEvolution(genotype);
     }
 
-  // need modification all 64 can't be of one type
-  public void initPayload() throws FileNotFoundException,IOException{
-    payload = new ShipContainer[65];
-    // read from excel avg container weights
+    
+    public void initPayload() throws FileNotFoundException,IOException{
+    // instantiate payload    
+    payload = new ShipContainer[64];
+    
+    // read payload data from excel spreadsheet
     readExcelFile(inputFile);
-    for (int i = 1; i < payload.length; i++) {
+    for (int i = 0; i < payload.length; i++) {
       writer("Container: "+payload[i].getContainerID()+
               " of type: "+payload[i].getType()+ "ft"+
               " with Weight: "+payload[i].getWeight()
               );
     }
   }
-  
-  public void readExcelFile(String fileName) throws FileNotFoundException,IOException
-    {
+
  
+    protected final Genotype configureJGAP()
+            throws Exception
+    {
+    writer("-------------configure JGAP-----------");
+    numEvolutions = 2;
+    Configuration gaConf = new DefaultConfiguration();
+    gaConf.resetProperty(Configuration.PROPERTY_FITEVAL_INST);
+    gaConf.setFitnessEvaluator(new DeltaFitnessEvaluator());
+    
+    // Setup some other parameters.
+    // --------------------------------------------------
+    gaConf.setPreservFittestIndividual(true);
+    //constant population size
+    gaConf.setKeepPopulationSizeConstant(true);
+    // Set number of individuals per generation.
+    // --------------------------------------------------
+    // get from user
+    gaConf.setPopulationSize(50);
+    
+    writer("numEvolutions "+ numEvolutions);
+    
+    int chromeSize = payload.length;
+    Genotype genotype = null;
+    try {   
+     
+      // Setup the structure with which to evolve the
+      // solution of the problem.
+      // Sample Chromosome for the genotype
+      // --------------------------------------------
+      // application Constraints
+      Gene sampleGene = new IntegerGene(gaConf);
+      sampleGene.setConstraintChecker(lightWeightConstraint);
+  
+      IChromosome sampleChromosome = new Chromosome(gaConf,sampleGene,chromeSize);
+      sampleChromosome.setConstraintChecker(lightWeightConstraint);
+      System.out.println("-----------------------------------------------------");
+      // IChromosome sampleChromosome = new Chromosome(gaConf, new IntegerGene(gaConf),chromeSize);  
+      // Add sample chromosome to Config
+      gaConf.setSampleChromosome(sampleChromosome);
+
+      /********* SET FITNESS FUNCTION******/
+      gaConf.setFitnessFunction(new EqualWeightsFitnessFunction(payload));
+      
+       //Create Rate Calculators for Operators
+       muteRateCalc = new MutationRateCalculator(gaConf);
+       crossRateCalc = new CrossoverRateCalculator(gaConf);
+     
+      //Add Genetic Operators to config
+      gaConf.getGeneticOperators().clear();
+    
+ 
+      // Operators applied in the order in which they are added
+      // Define crossover op with crossover rate
+      if(adaptive){
+      crossover = new CrossoverOperator(gaConf,crossRateCalc);
+      }
+      else{
+      crossover = new CrossoverOperator(gaConf,10);
+      }
+      
+      gaConf.addGeneticOperator(crossover);
+      System.out.println(crossover.getCrossOverRate());
+      
+      //Swapping operator instead of mutation
+      //Swapper Op with muterate rate
+      
+      if(adaptive){
+          swapper = new SwappingMutationOperator(gaConf,muteRateCalc);
+      }
+      else{
+          swapper = new SwappingMutationOperator(gaConf,10);
+      }
+      
+      //swapper.setMutationRate(integer);
+      gaConf.addGeneticOperator(swapper);
+      System.out.println(swapper.getMutationRate());
+
+      //Initialise genotype with random population
+      genotype = Genotype.randomInitialGenotype(gaConf);
+
+      // Initialize all chromosomes in the genotype
+      // each number from 1..64
+      // is represented by exactly one gene.
+      // --------------------------------------------------------
+      writer("Populating randomly initialized chromosome population.");
+      List<IChromosome> chromosomes = genotype.getPopulation().getChromosomes();
+      for (int i = 0; i < chromosomes.size(); i++) {
+        IChromosome chrom = (IChromosome) chromosomes.get(i);
+        for (int j = 0; j < chrom.size(); j++) {
+          IntegerGene gene = (IntegerGene) chrom.getGene(j);
+          gene.setAllele(new Integer(j));
+          System.out.println("Constraint Checker "+gene.getConstraintChecker());
+        }
+      }
+    } catch (InvalidConfigurationException e) {
+      e.printStackTrace();
+      System.exit( -2);
+    }
+    return genotype;
+   // GA Configurations ends
+  }
+    
+  // do Evolution of the chromosome population (Genotype)
+    
+    public void doEvolution(Genotype a_genotype) throws FileNotFoundException,IOException{      
+    writer("--doEvolution--");
+    int progress = 0;
+    int percentEvolution = numEvolutions / 100;
+        
+    // Evolution loop for numEvolution
+    for (int i = 0; i < numEvolutions; i++) {
+        // Configuring Rate Calculater for Dynamic rate calculation
+        writer("Configuring Dynamic rate params...");
+        configRateCalc(a_genotype);
+        // Evolving current population
+        writer("Evolving neXt-Gen!!");
+        a_genotype.evolve();
+        /*List<String> messages = a_genotype.evolve(monitor);
+        if (messages.size() > 0) {
+            for (String msg : messages) {
+             System.out.println("Message from monitor: " + msg+"\n");
+             }
+        }*/
+        writer("Evolution happened with rates..");
+        //Printout current Rates
+        printRates(a_genotype);
+        writer("Evolution complete.");
+     }
+ 
+    // Print summary.
+    // --------------
+    IChromosome fittest = a_genotype.getFittestChromosome();
+    writer("Best solution has fitness " +
+                       fittest.getFitnessValue());
+    printSolution(fittest);
+  }
+  
+   // doEvolution ends
+  
+  // Print the Best Chromosome found to be the best solution by GA
+    
+    public void printSolution(IChromosome a_solution) throws FileNotFoundException,IOException{
+    double groupWeights = 0.0d;
+    for (int i = 0; i < 16; i++) {
+      writer("\nGroup " + i);
+      writer("-------");
+      double groupWeight = 0.0d;
+      for (int j = 0; j < 4; j++) {
+        IntegerGene containerID = (IntegerGene) a_solution.getGene( (i * 4 + j));
+        ShipContainer container = (ShipContainer) payload[containerID.intValue()];
+        double weight = container.getWeight();
+        groupWeight += weight;
+        writer(" Container with id "
+                           + containerID.intValue()
+                           + " with weight "
+                           + weight);
+      }
+      groupWeights += groupWeight;
+      writer("  --> Group weight: " + groupWeight);
+    }
+    writer("\n Average group weight: " + groupWeights / 16);
+    
+  }
+    
+    // Adaptive GA Config
+    public void configRateCalc(Genotype genotype)throws FileNotFoundException,IOException{
+     // Finding MaxFitness in the Population
+      IChromosome   best = genotype.getFittestChromosome();
+      maxGenotypeFitness = best.getFitnessValue();
+      
+     // Finding Average Fitness of every population
+      int sumFitness = 0,count=0;
+      double[] indFitness = new double[65];
+      List<IChromosome> population = genotype.getPopulation().getChromosomes();
+      for (IChromosome chromosome:population){
+          indFitness[count] = chromosome.getFitnessValue();
+          sumFitness += chromosome.getFitnessValue();
+          writer("indFitness: "+indFitness[count]);
+          count++;
+      }
+      
+        genotypeAvgFitness = sumFitness/50;
+        writer("Average Fitness of the Population: "+ genotypeAvgFitness);
+        
+        //fitnessDelta between avgFitness and maxFitness
+        fitnessDelta = genotypeAvgFitness - maxGenotypeFitness;
+        writer("fitnessDelta: "+fitnessDelta);
+        
+        //fitnessDelta between avgFitness and indFitness
+        crossRateCalc.setFitnessDelta(fitnessDelta);
+        crossRateCalc.setGenotypeAvgFitness(genotypeAvgFitness);
+        crossRateCalc.setIndFitness(indFitness);
+    }
+    
+    public void setupMonitor(){
+        List monitors = new Vector();
+        monitors.add(new TimedMonitor(6));
+        monitors.add(new FitnessImprovementMonitor(1, 3, 5.0d));
+        monitor = new ChainedMonitors(monitors, 2);
+    }
+    
+     public void readExcelFile(String fileName) throws FileNotFoundException,IOException
+    {
         try{
         /** Creating Input Stream**/
         //InputStream myInput= ReadExcelFile.class.getResourceAsStream( fileName );
@@ -113,7 +338,7 @@ BufferedWriter output = new BufferedWriter(fr);
                         }
                         default :
                         {
-                            // types other Numeric.
+                            // types other
                             System.out.println ("Type not supported.");
                             break;
                         }
@@ -134,158 +359,48 @@ BufferedWriter output = new BufferedWriter(fr);
                         }
                 container.setContainerID(containerID);
                 container.setWeight(weight);
-                payload[i] = container;
+                payload[i-1] = container;
             }
               i++;
           }
         }catch (Exception e){e.printStackTrace(); }
         //return cellVectorHolder;
     }
- 
-    protected final Genotype configureJGAP()
-            throws Exception
-    {
-    System.out.println("--configure JGAP--");
-    numEvolutions = 50;
-    Configuration gaConf = new DefaultConfiguration();
-    gaConf.resetProperty(Configuration.PROPERTY_FITEVAL_INST);
-    gaConf.setFitnessEvaluator(new DeltaFitnessEvaluator());
-    // Just use a swapping operator instead of mutation and others.
-    // ------------------------------------------------------------
-    gaConf.getGeneticOperators().clear();
-    
-    // Operators applied in the order in which they are added
-    // Define crossover op with rossover rate
-    CrossoverOperator crossover = new CrossoverOperator(gaConf,10);
-    System.out.println(crossover.getCrossOverRate());
-    gaConf.addGeneticOperator(crossover);
-    
-    SwappingMutationOperator swapper = new SwappingMutationOperator(gaConf);
-    //swapper.setMutationRate(integer);
-    gaConf.addGeneticOperator(swapper);
-    System.out.println(swapper.getMutationRate());
-    // Setup some other parameters.
-    // ----------------------------
-    gaConf.setPreservFittestIndividual(true);
-    gaConf.setKeepPopulationSizeConstant(false);
-    // Set number of individuals (=tries) per generation.
-    // --------------------------------------------------
-    gaConf.setPopulationSize(50);
-    int chromeSize = payload.length;
-    Genotype genotype = null;
-    try {
-      // Setup the structure with which to evolve the
-      // solution of the problem.
-      // --------------------------------------------
-      IChromosome sampleChromosome = new Chromosome(gaConf,
-          new IntegerGene(gaConf), chromeSize);
-      gaConf.setSampleChromosome(sampleChromosome);
-
-      /********* SET FITNESS FUNCTION******/
-     gaConf.setFitnessFunction(new EqualWeightsFitnessFunction(payload));
-      //
-      genotype = Genotype.randomInitialGenotype(gaConf);
-      // each number from 1..64
-      // is represented by exactly one gene.
-      // ---------------------------------------------------------
-      List chromosomes = genotype.getPopulation().getChromosomes();
-      for (int i = 0; i < chromosomes.size(); i++) {
-        IChromosome chrom = (IChromosome) chromosomes.get(i);
-        for (int j = 0; j < chrom.size(); j++) {
-          Gene gene = (Gene) chrom.getGene(j);
-          gene.setAllele(new Integer(j));
-        }
-      }
-    } catch (InvalidConfigurationException e) {
-      e.printStackTrace();
-      System.exit( -2);
-    }
-    return genotype;
-  }
-    
-  // do Evolution of the chromosome population 
-    
-    public void doEvolution(Genotype a_genotype) throws FileNotFoundException,IOException{      
-    writer("--doEvolution--");
-    int progress = 0;
-    int percentEvolution = numEvolutions / 100;
-        writer("numEvolutions "+numEvolutions);
-    for (int i = 0; i < numEvolutions; i++) {
-        a_genotype.evolve();
-      // Print progress.
-      // ---------------
-      if (percentEvolution > 0 && i % percentEvolution == 0) {
-          System.out.println("inside..");
-        progress++;
-        IChromosome fittest = a_genotype.getFittestChromosome();
-        double fitness = fittest.getFitnessValue();
-        writer("Currently best solution has fitness " +
-                           fitness);
-        printSolution(fittest);
-      }
-      // Finding MaxFitness in the Population
-      IChromosome best = a_genotype.getFittestChromosome();
-      maxGenotypeFitness = best.getFitnessValue();
-      // Finding Average Fitness of every population
-      List<IChromosome> chromosomes = a_genotype.getPopulation().getChromosomes();
-      int sumFitness = 0;
-      for (IChromosome chromosome:chromosomes){
-          sumFitness += chromosome.getFitnessValue();
-      }
-          genotypeAvgFitness = sumFitness/a_genotype.getPopulation().size();
-          fitnessDelta = maxGenotypeFitness - genotypeAvgFitness;
-          writer("Average Fitness of the Population: "+ genotypeAvgFitness);
-          writer("fitnessDelta: "+fitnessDelta);
-          sumFitness = 0;
-          chromosomes = null;
-    }
-
-    // Print summary.
-    // --------------
-    IChromosome fittest = a_genotype.getFittestChromosome();
-    writer("Best solution has fitness " +
-                       fittest.getFitnessValue());
-    printSolution(fittest);
-  }
-  
-  // Print the Best Chromosome found to be the best solution by GA
-    
-    public void printSolution(IChromosome a_solution) throws FileNotFoundException,IOException{
-    double groupWeights = 0.0d;
-    for (int i = 0; i < 16; i++) {
-      writer("\nGroup " + i);
-      writer("-------");
-      double groupWeight = 0.0d;
-      for (int j = 1; j < 5; j++) {
-        IntegerGene containerID = (IntegerGene) a_solution.getGene( (i * 4 + j));
-        ShipContainer container = (ShipContainer) payload[containerID.intValue()];
-        double weight = container.getWeight();
-        groupWeight += weight;
-        writer(" Container with id "
-                           + containerID.intValue()
-                           + " with weight "
-                           + weight);
-      }
-      groupWeights += groupWeight;
-      writer("  --> Group weight: " + groupWeight);
-    }
-    writer("\n Average group weight: " + groupWeights / 16);
-    
-  }
     
   public void writer(String str) throws FileNotFoundException,IOException{
       System.out.println(str);
       output.write(str);
   }
+  
     public static void main(String[] args) {
         try {
             System.out.println("Excution Starts....");
-            new LoadDistribution("C:\\temp\\test.xls");
+            new LoadDistribution("C:\\temp\\test.xls", "C:\\temp\\params.cfg");
             System.out.println("....Done.....");
         } catch (Exception e) {
             System.out.println("Errored out in main");
             e.printStackTrace();
         }
         
+    }
+    
+    public void printRates(Genotype a_genotype)throws FileNotFoundException,IOException{
+        CrossoverOperator c = null;
+        SwappingMutationOperator s = null;
+        List<BaseGeneticOperator> genops= a_genotype.getConfiguration().getGeneticOperators();
+        for(BaseGeneticOperator op:genops){
+            if(op instanceof CrossoverOperator){
+                c = (CrossoverOperator)op;
+                System.out.println("Static CrossOver Rate: "+c.getCrossOverRate());
+            }
+            else if(op instanceof SwappingMutationOperator){
+                s = (SwappingMutationOperator)op;
+                System.out.println("Mutation Rate: "+s.getMutationRate());
+            }
+            else{
+                writer("Unknown Operator");
+            }
+        }
+        System.out.println("--From printRates: "+ a_genotype.getFittestChromosome().getFitnessValue());
     }
 }

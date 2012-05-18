@@ -22,7 +22,7 @@ public class EqualWeightsFitnessFunction
     double squaredDiff = 0.0d;
     for (int i = 0; i < 16; i++) {
       double groupWeight = 0.0d;
-      for (int j = 1; j < 5; j++) {
+      for (int j = 0; j < 4; j++) {
         IntegerGene containerID = (IntegerGene) a_subject.getGene( (i * 4 + j));
         ShipContainer container= (ShipContainer) payload[containerID.intValue()];
         groupWeight += container.getWeight();
