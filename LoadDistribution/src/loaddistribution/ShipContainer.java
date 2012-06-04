@@ -11,6 +11,7 @@ package loaddistribution;
  public abstract class ShipContainer {
     protected int containerID;
     protected double weight;
+    protected int pair = 0;
     public int getContainerID() {
         return containerID;
     }
@@ -29,6 +30,10 @@ package loaddistribution;
 
     public void setWeight(double weight) {
         this.weight = weight;
+    }
+    
+    public int getPair() {
+        return pair;
     }
     
 }

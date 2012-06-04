@@ -16,6 +16,7 @@ public class Standard40ft extends ShipContainer{
     private double floorArea; 
     private double volume;
     
+
     public Standard40ft() {
         floorArea = this.length * this.width;
         volume = floorArea * height;
@@ -43,4 +44,5 @@ public class Standard40ft extends ShipContainer{
         return width;
     }
     
+
 }

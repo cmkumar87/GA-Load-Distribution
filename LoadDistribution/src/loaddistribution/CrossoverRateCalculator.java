@@ -17,43 +17,63 @@ import org.jgap.impl.DefaultCrossoverRateCalculator;
  */
 public class CrossoverRateCalculator extends DefaultCrossoverRateCalculator{
 
-    private double[] indFitness = new double[65];
+    
     private double genotypeAvgFitness;
     private double maxGenotypeFitness;
-    private double fitnessDelta;
-    private int rate;
+    private double chromeOneFitness;
+    private double chromeTwoFitness;
+    private double currentFitness;
+    private int    rate;
+    
 
-    public void setFitnessDelta(double fitnessDelta) {
-        this.fitnessDelta = fitnessDelta;
+
+
+    public void setMaxGenotypeFitness(double maxGenotypeFitness) {
+        this.maxGenotypeFitness = maxGenotypeFitness;
     }
+    
+
+    public void setChromeOneFitness(double chromeOneFitness) {
+        this.chromeOneFitness = chromeOneFitness;
+    }
+
+    public void setChromeTwoFitness(double chromeTwoFitness) {
+        this.chromeTwoFitness = chromeTwoFitness;
+    }
+
+    public void setCurrentFitness(double currentFitness) {
+        this.currentFitness = currentFitness;
+    }
+
 
     public void setGenotypeAvgFitness(double genotypeAvgFitness) {
         this.genotypeAvgFitness = genotypeAvgFitness;
     }
 
-    public void setIndFitness(double[] indFitness) {
-        this.indFitness = indFitness;
-    }
-    
-    private double pickIndFitnessAt(int index){
-        return indFitness[index];
+    // Rate calulator method
+    public CrossoverRateCalculator(Configuration a_config)
+        throws InvalidConfigurationException {
+        super(a_config);
     }
 
-  public CrossoverRateCalculator(Configuration a_config)
-      throws InvalidConfigurationException {
-    super(a_config);
-
-  }
-    
-  public int calculateCurrentRate(){
+    public int calculateCurrentRate(){
+        
+        //currentFitness = Math.max(chromeOneFitness,chromeTwoFitness);
+        
+      if ( currentFitness == maxGenotypeFitness )  {
+        rate = 0;  // max fit. probability of mutation is 0
+      }
+      else if(currentFitness <= genotypeAvgFitness){
+        rate = (int)(((currentFitness - maxGenotypeFitness)/(genotypeAvgFitness - maxGenotypeFitness ))*100);
+        // high fit - diff will be smaller for numerator than denominator => value <= 1
+      }
+      else{
+          rate = 100;
+      }
+      
       writer("Running calculateCurrentRate..."+rate);
-      
-      
-//    int size = getConfiguration().getChromosomeSize();
-//    if (size < 1) {
-//      size = 1;
-//    }
-    return rate;
+      return rate;
+        
   }
   
   public void writer(String str){
